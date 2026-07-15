@@ -1,0 +1,60 @@
+name: Enterprise DevOps CI/CD
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore Dependencies
+        run: dotnet restore employee-api/EmployeeApi/EmployeeApi.csproj
+
+      - name: Build Project
+        run: dotnet build employee-api/EmployeeApi/EmployeeApi.csproj --configuration Release --no-restore
+
+      - name: Publish Project
+        run: dotnet publish employee-api/EmployeeApi/EmployeeApi.csproj -c Release -o publish
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker Image
+        run: |
+          docker build \
+            -t ${{ secrets.DOCKER_USERNAME }}/employee-api:latest \
+            ./employee-api/EmployeeApi
+
+      - name: Push Docker Image
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/employee-api:latest
+
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/enterprise-devops-project
+            docker pull ${{ secrets.DOCKER_USERNAME }}/employee-api:latest
+            docker compose down
+            docker compose up -d --build
+
+            sleep 20
+
+            curl http://localhost/api/employees
